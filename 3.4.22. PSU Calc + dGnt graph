@@ -1,0 +1,322 @@
+#Hello Git World!
+#Instructions for next steps in my "Investigating PSUs Project" 
+#Step 1: Find the PSUs, and then remove the low expression PSUs 
+#Step 2: Using the WT and the KO G3BP1 files, find the difference in the difference of decay for the PSUs
+#Step 3: Filter for the most significantly different WT and KO G3BP1 PSUs - use t or p test
+
+#Step 1: Calculating the PSUs and removing "low expression PSUs"
+
+#11/5/21: GOAL: to now create the entire PSU set by merging through gene name rather than ENST name
+
+#set up workspace: 
+library(tidyverse)
+library(data.table)
+library(matrixStats)
+
+#Threading in the data: 
+setwd("/Users/caroline/Downloads/Archive/")
+tpm_all <- read.csv('all_sample_tpm.csv', header = TRUE)
+
+setwd("/Users/caroline/Downloads/")
+UTR<- fread('UTR.csv', header=TRUE)
+threeprimeutr <- fread("3'_UTRs.csv", header = TRUE)
+
+#Using the all_files, look for the highest decay of the decay: 
+head(tpm_all) #I want to get rid of the SHSYsh columns and the 8 hours columns 
+tpm_some <- subset(tpm_all, select = -c(DLD1KO8hr1, DLD1KO8hr2, DLD1WT8hr1, DLD1WT8hr2, SHSY5YshG3BP11, SHSY5YshG3BP12, SHSY5YshScram1, SHSY5YshScram2))
+head(tpm_some)
+
+#For the 0 and 16 hours comparisons between KO and WT, do a t-test to test for significant differences between the two columns.
+#Adding a t-test column in the dataframe - its between ALL WT versus ALL KO. We also need to filter out the low expression gene values so the data is not essentially constant. 
+#To filtr out for constant values, sum up all the DL per each row and if the value is too small, get rid of the gene row
+
+#Summing up each row 
+tpm_KO_0 <- subset(tpm_some, select = c('X','DLD1KO0hr1', 'DLD1KO0hr2'))
+tpm_KO_16 <- subset (tpm_some, select = c('X','DLD1KO16hr1', 'DLD1KO16hr2'))
+tpm_WT_0 <- subset(tpm_some, select = c('X', 'DLD1WT0hr1', 'DLD1WT0hr2'))
+tpm_WT_16 <- subset(tpm_some, select = c('X', 'DLD1WT16hr1', 'DLD1WT16hr2'))
+
+#For each subset, we now want to find if any of the values from 1 and 2 are the same - if so, eliminate: 
+head(tpm_KO_0)
+tpm_KO_0 <- mutate(tpm_KO_0, tpm_KO_0$DLD1KO0hr1 == tpm_KO_0$DLD1KO0hr2)
+names(tpm_KO_0)[4] <- "Identical?"
+tpmKO_0<-filter(tpm_KO_0, tpm_KO_0$`Identical?`==FALSE)
+
+tpm_KO_16<- mutate(tpm_KO_16, tpm_KO_16$DLD1KO16hr1 == tpm_KO_16$DLD1KO16hr2)
+names(tpm_KO_16)[4] <- "Identical?"
+tpmKO_16 <- filter(tpm_KO_16, tpm_KO_16$`Identical?`==FALSE)
+
+tpm_WT_0<- mutate(tpm_WT_0,tpm_WT_0$DLD1WT0hr1 == tpm_WT_0$DLD1WT0hr2)
+names(tpm_WT_0)[4] <- "Identical?"
+tpmWT_0 <- filter(tpm_WT_0,tpm_WT_0$`Identical?`==FALSE)
+
+tpm_WT_16 <- mutate(tpm_WT_16, tpm_WT_16$DLD1WT16hr1 == tpm_WT_16$DLD1WT16hr2)
+names(tpm_WT_16)[4] <- "Identical?"
+tpmWT_16 <- filter(tpm_WT_16, tpm_WT_16$`Identical?`==FALSE)
+
+#Adding every part back into a merged dataframe. 
+filteredtpm <- merge(tpmWT_16, tpmWT_0,by='X') %>% 
+  merge(tpmKO_0, by='X') %>% 
+  merge(tpmKO_16, by='X')
+head(filteredtpm)
+
+#Cleaning up excess columns from the dataframes: 
+filteredtpm <- filteredtpm[,c(-4,-7, -10,-13)]
+#RESULT <- If you head(filteredtpm), you will see a dataframe with all identical values taken out
+head(filteredtpm)
+
+#These for loops get the p-value from the t.test comparisons: 
+filteredtpm$KOpval <- 1
+for(i in 1:nrow(filteredtpm)){
+  filteredtpm[i,"KOpval"]<-t.test(c(filteredtpm[i,'DLD1KO0hr1'], filteredtpm[i,'DLD1KO0hr2']), c(filteredtpm[i,'DLD1KO16hr1'], filteredtpm[i,'DLD1KO16hr2']))$p.value
+} 
+head(filteredtpm)
+
+filteredtpm$WTpval <- 1
+for(i in 1:nrow(filteredtpm)){
+  filteredtpm[i,"WTpval"]<-t.test(c(filteredtpm[i,'DLD1WT0hr1'], filteredtpm[i,'DLD1WT0hr2']), c(filteredtpm[i,'DLD1WT16hr1'], filteredtpm[i,'DLD1WT16hr2']))$p.value
+} 
+head(filteredtpm)
+
+########
+#Step 2: Figure out which WT vs KO have significant p-values (p < 0.05) and negative differences
+#Filter for p-value that are less than 0.05
+tpm_merged <- filteredtpm %>% filter(KOpval < 0.25 &
+                 WTpval < 0.25)
+head(tpm_merged)
+
+#Find the difference in means from t.test for more accurate directionality comparison, which we can extract from the t.test "estimate" value
+tpm_merged$KOdiffmeans <- 1
+for(i in 1:nrow(tpm_merged)){
+  means<-t.test(c(tpm_merged[i,'DLD1KO0hr1'], tpm_merged[i,'DLD1KO0hr2']), c(tpm_merged[i,'DLD1KO16hr1'], tpm_merged[i,'DLD1KO16hr2']))$estimate
+  tpm_merged[i,"KOdiffmeans"]<-means[1]/means[2]
+}
+
+tpm_merged$WTdiffmeans <- 1
+for(i in 1:nrow(tpm_merged)){
+  means<-t.test(c(tpm_merged[i,'DLD1WT0hr1'], tpm_merged[i,'DLD1WT0hr2']), c(tpm_merged[i,'DLD1WT16hr1'], tpm_merged[i,'DLD1WT16hr2']))$estimate
+  tpm_merged[i,"WTdiffmeans"]<-means[1]/means[2]
+} 
+head(tpm_merged)
+
+############filter for positive FC WT and KO
+tpm_merged <- filter(tpm_merged, tpm_merged$KOdiffmeans > 0)
+tpm_merged <- filter(tpm_merged, tpm_merged$WTdiffmeans > 0)
+head(tpm_merged)
+colnames(tpm_merged)[1] <- "Gene Name"
+
+#Step 3: Find the PSUs, and set up cutoffs for Full Change/SRD PSU candidates
+#First: Matching the PSUs from UTR file to the tpm_merged X column gene names
+# setwd("/Users/caroline/Downloads/")
+# name_df <- fread('MANE.GRCh38.v0.95.summary.txt', header = TRUE)
+# genetoENST <- name_df[,c('symbol', 'Ensembl_nuc')]
+# colnames(genetoENST)[1] <- "Gene Name"
+# renamedtpm <- merge(tpm_merged, genetoENST, by = "Gene Name")
+# head(renamedtpm)
+# ENSTnm <- renamedtpm[,c('Ensembl_nuc')]
+# list(ENSTnm)
+
+#merge everything using gene name: 
+mergedwthreeprime <- merge(tpm_merged, threeprimeutr, by = "Gene Name")
+
+#Create matching modified names to merge the dataframes
+#modify names to match precisely: 
+# modify <- gsub("\\..*", "", ENSTnm)
+# list(modify)
+# renamedtpm$Ensembl_nuc <- modify
+# head(renamedtpm)
+# colnames(renamedtpm)[14] <- "name"
+# mergedwithUTR <- merge(UTR, renamedtpm, by = "name")
+# head(mergedwithUTR)
+
+#PSU is greater than -0.25: Filter for the PSUs: 
+PSUs <- filter(mergedwthreeprime, mergedwthreeprime$`Delta G per Nucleotide` > -0.25) #1506 PSUs, filtered for PSUs
+JoesPSU <- filter(mergedwthreeprime, mergedwthreeprime$`Delta G per Nucleotide` > -0.2) #422 PSUs, a more conservative definition
+HSUs <- filter(mergedwthreeprime, mergedwthreeprime$`Delta G per Nucleotide` < -0.25)
+
+head(PSUs)
+
+#unnecessary amount of information, so time to slim it down
+PSU <- PSUs[, c(1, 10, 11, 12, 13, 14, 22, 23)]
+JoesPSU <- JoesPSU[, c(1, 10, 11, 12, 13, 14, 22, 23)]
+HSU <- HSUs[, c(1, 10, 11, 12, 13, 14, 22, 23)]
+
+#Adding this in a little later, 11/5/2021
+#Needing to get the threeprimeutr mRNA numbers into the PSU dataframe, by linking up..
+#merge by connecting TWO columns: length, dG_nt b/w PSUs and threeprimeutr
+# colnames(PSUs)[4] <- "Length"
+# colnames(threeprimeutr)[10] <- "dG_nt"
+# idkmerge <- merge(PSUs, threeprimeutr, by = c("Length", "dG_nt"))
+
+#Calculate the Odds Ratio: if WT is > KO then SRD: 
+PSU <- mutate(PSU, PSU$WTdiffmeans/PSU$KOdiffmeans)
+head(PSU)
+colnames(PSU)[9] <- "WT/KO"
+
+JoesPSU <- mutate(JoesPSU, JoesPSU$WTdiffmeans/JoesPSU$KOdiffmeans)
+colnames(JoesPSU)[9] <- "OR"
+
+SRD_PSU <- filter(PSU, PSU$`WT/KO` > 1.2)
+
+HSU <- mutate(HSU, HSU$WTdiffmeans/HSU$KOdiffmeans)
+colnames(HSU)[9] <- "WT/KO"
+
+###### 
+PSUs <- mutate(PSUs, PSUs$WTdiffmeans/PSUs$KOdiffmeans)
+colnames(PSUs)[26] <- "WT/KO"
+colnames(PSUs)[22] <- "dG_nt"
+
+HSUs <- mutate(HSUs, HSUs$WTdiffmeans/HSUs$KOdiffmeans)
+colnames(HSUs)[26] <- "WT/KO"
+colnames(HSUs)[22] <- "dG_nt"
+
+#Compare HSU and PSU with visual graph overlays: ALL CODE BEYOOND THIS POINT WAS NOT MODIFIED ON NOV 5 2021
+allus <- rbind(HSUs, PSUs)
+head(allus)
+allusfilt <- select(allus, c('WT/KO', 'dG_nt', 'Gene Name'))
+
+#code added on Feb 24, 2022
+#i want dgnt on the xaxis, wt/ko on the yaxis, lm(HSU) and lm(PSU) being graphed with a spline at 0.25
+#add a column naming as HSU or PSU: 
+allusfilt<-mutate(allusfilt, `HSU or PSU` = case_when(allusfilt$dG_nt > -0.25 ~ "PSU",
+                                                      allusfilt$dG_nt < -0.25 ~ "HSU"))
+
+#histogram of odds ratio, log2 odds ratio: 
+hist(allusfilt$`WT/KO`)
+hist(log2(allusfilt$`WT/KO`)) #log2 normalizes the odds ratio, so we're going to use that instead
+
+library(ggplot2)
+plot(log2(allusfilt$`WT/KO`) ~ allusfilt$dG_nt)
+
+#now i need to add the lm function stuff: 
+lm(HSU$`WT/KO` ~ HSU$`Delta G per Nucleotide`) 
+
+hsulm <- lm(log2(HSU$`WT/KO`) ~ HSU$`Delta G per Nucleotide`)
+summary(hsulm)
+hsuintercept <- hsulm$coefficients[1] %>% as.numeric()
+hsuintercept
+hsustart <- min(HSU$`Delta G per Nucleotide`) %>% as.numeric()
+hsustart
+hsuslope <- hsulm$coefficients[2] %>% as.numeric()
+hsuslope
+
+#finding the end and start of the geom_segment, hsu: 
+y <- (-0.25 * hsuslope) + hsuintercept
+# y = -0.0345
+yy <- (hsustart * hsuslope) + hsuintercept
+# yy = 3.7161
+
+psulm <- lm(log2(PSU$`WT/KO`) ~ PSU$`Delta G per Nucleotide`)
+summary(psulm)
+psuintercept <- psulm$coefficients[1] %>% as.numeric()
+psuintercept
+psuend <- max(PSU$`Delta G per Nucleotide`) %>% as.numeric()
+psuend
+psuslope <- psulm$coefficients[2] %>% as.numeric()
+psuslope
+
+#finding the end and start of the geom_segment, psu: 
+#start: 
+yp <- (-0.25 * psuslope) + psuintercept #yp = -0.0239
+#end 
+ypp <- (psuend * psuslope) + psuintercept #ypp = 0.156
+
+#how to code out output of an image: 
+jpeg(file = "dgnt versus log2 OR with lm overlay", width = 480, height = 480,
+     pointsize = 12, quality = 75)
+
+ah <- ggplot(allusfilt, aes(x = allusfilt$dG_nt, y = log2(allusfilt$`WT/KO`)))
+           
+ah + geom_point() + 
+  geom_segment(x = hsustart, xend = -0.25, y = yy, yend = y, colour = "red") +
+  geom_segment(x = -0.25, xend = psuend, y = yp, yend = ypp, colour = "blue") +
+  theme_classic() + 
+  xlab("Delta G per Nucleotide") + 
+  ylab("Log 2 of WT/KO Odds Ratio") 
+
+dev.off()
+#to close the file: dev.off()
+
+##############
+allusfilt<-mutate(allusfilt, group = case_when(allusfilt$dG_nt >= -0.2 ~ 1,
+                                               allusfilt$dG_nt < -0.2 &  allusfilt$dG_nt >= -0.3 ~ 2, 
+                                               allusfilt$dG_nt >= -0.4 & allusfilt$dG_nt < -0.3 ~ 3,
+                                               allusfilt$dG_nt >= -0.5 & allusfilt$dG_nt < -0.4 ~ 4,
+                                               allusfilt$dG_nt >= -1.0 & allusfilt$dG_nt < -0.5 ~ 5))
+colnames(allusfilt)[4] <- "struc"
+
+all_Us<-data.frame(struc = c(rep("HSU", nrow(HSUs)), rep("PSU", nrow(PSUs))),
+                   OR = c(HSUs$`WT/KO`, PSUs$`WT/KO`))
+
+q = ggplot(all_Us, aes(x = OR, color = struc)) +
+  geom_density() +
+  theme_classic() +
+  xlim(0, 2.5)
+
+q + ggtitle("Plot of Transcript Odds Ratio Grouped by HSU or PSU") + 
+  xlab("Odds Ratio") + ylab("Density")
+
+u = ggplot(allusfilt, aes(x = `WT/KO`, color = as.factor(group))) + 
+   geom_density() + 
+   theme_classic() + 
+   xlim(0, 2.5) 
+
+u + ggtitle("Plot of Transcripts Odds Ratios Grouped by Bin") +
+   xlab("Odds Ratio") + ylab("Density")
+
+quantile(allusfilt$dG_nt)
+allusfilt<-mutate(allusfilt, group = case_when(allusfilt$dG_nt < -0.337 ~ "0 to 25",
+                                               allusfilt$dG_nt < -0.2704 &  allusfilt$dG_nt > -0.337 ~ "25 to 50", 
+                                               allusfilt$dG_nt < -0.2295 & allusfilt$dG_nt > -0.2704 ~ "50 to 75",
+                                               allusfilt$dG_nt > -0.2295 ~ "75 to 100"))
+                                               
+p <- ggplot(allusfilt, aes(x = `WT/KO`, color = as.factor(group))) + 
+  stat_ecdf() + 
+  theme_classic() +
+  xlim(.5, 2) #removed 33 rows of values (that we cut off because we wanted to zoomz in)
+
+p + ggtitle("Plot of Transcipts Odds Ratios Grouped by Delta G Per Nucleotide Quantile") + 
+  xlab("WT/KO Odds Ratio") + ylab("Cumulative Density")
+
+ks.test(allusfilt[which(allusfilt$group == "0 to 25"), "WT/KO"],
+        allusfilt[which(allusfilt$group == "75 to 100"), "WT/KO"])
+
+#where D is the maximal vertical deviation between the two frequencies, but it doesn't tell u where it is
+high <- ecdf(allusfilt[which(allusfilt$group == "0 to 25"), "WT/KO"])
+low <- ecdf(allusfilt[which(allusfilt$group == "75 to 100"), "WT/KO"])
+
+
+x <- c(allusfilt[which(allusfilt$group == "0 to 25"), "WT/KO"], allusfilt[which(allusfilt$group == "75 to 100"), "WT/KO"]) # the points where Fa or Fb jump
+
+x[max(abs(high(x) - low(x))) == abs(high(x) - low(x))] #1.06= point of max separation b/w which the highest/lowest OR SRD 
+
+#Making the cutoff for the SRD candidates: Cutoff 
+#if I were to set at 1.047: 
+sum(PSUs$`WT/KO` > 1.047)/nrow(PSUs) #29.9% of PSUs are kept 
+sum(PSUs$`WT/KO` > 1.10)/nrow(PSUs) #25.8% of PSUs are kept 
+sum(PSUs$`WT/KO` > 1.2)/nrow(PSUs) #11% of PSUs are kept, or 333 PSU genes
+sum(JoesPSU$OR > 1.2)/nrow(JoesPSU) 
+
+#Will probably set the WT/KO OR at 1.2 for "SRD PSU genes"
+SRD_PSU <- filter(PSUs, PSUs$`WT/KO` > 1.2)
+
+#exporting SRD_PSU, PSUs, JoesPSU, allusfilt as .csv
+write.csv(allusfilt,"/Users/caroline/Desktop/srd_github/allusfilt.csv", quote = F)
+write.csv(SRD_PSU,"/Users/caroline/Desktop/srd_github/SRD_PSU.csv", quote = F)
+write.csv(PSU,"/Users/caroline/Desktop/srd_github/PSUs.csv", quote = F, row.names = F)
+write.csv(JoesPSU,"/Users/caroline/Desktop/srd_github/JoesPSU.csv", quote = F)
+write.csv(HSUs,"/Users/caroline/Desktop/srd_github/HSUs.csv", quote = F)
+
+#What are my next steps going to be? We want to characterize the PSUs we found, but in what ways should I do this first?
+#FIRST: Characterize the PSUs we just filtered through GC content and gene ontology
+
+#SECOND: We have data that shows that breast cancer patients showing that lower G3BP1 expression means generally
+#higher structured RNA (which we can pretty much assume is SRD). However, there is a strange PSU shift at the end 
+#with G3BP1 expression, so I will look into these genes that are PSU shifted and then see if they fall within 
+#the PSU genes we filtered here. 
+
+
+
+
+
+
