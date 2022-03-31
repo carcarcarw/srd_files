@@ -1,0 +1,81 @@
+#Examining WT Decay in SRD-Target PSU Genes vs Non-SRD_Target PSU Genes
+#GO Term analysis is included, looks at the WTdecay rates between the PSUs/HSUs and compares them. 
+
+#load in the data/set up the workspace: 
+library(tidyverse)
+library(data.table)
+library(matrixStats)
+
+setwd("/Users/caroline/Desktop/srd_github/")
+allusfilt <- fread('allusfilt.csv', header = TRUE) 
+SRDPSU <- fread('SRD_PSU.csv', header = TRUE)
+PSUs <- fread('PSUs.csv', header = TRUE)
+JoesPSU <- fread('JoesPSU.csv', header = TRUE)
+HSUs <- fread('HSUs.csv', header = TRUE)
+
+#Compare the decay rate involves the WT difference means 
+#Make the dataframe with the Non-SRD involved PSUs: 
+nonsrd <- filter(PSUs, PSUs$`WT/KO` < 1.2) #2678 nonSRD
+srd <- filter(PSUs, PSUs$`WT/KO` > 1.2) #355 SRD 
+
+#We will be looking at the WTdiffmeans and comparing them to see whether one decays faster: 
+summary(nonsrd$WTdiffmeans)
+#For Non-SRD PSUs, the median decay rate is 2.0074 and mean is 2.8514 (min: 0.2143, max: 79.75)
+
+summary(srd$WTdiffmeans)
+#For SRD PSUs, the median decay rate is 4.220, mean is 5.913 (min:1.260, max:45.071)
+#Just based on summary statistics, the SRD PSUs have a hugely different WT decay rate
+ 
+#Graphing for Visualization: 
+ggplot(PSUs, aes(x = log(WTdiffmeans), y =log(`WT/KO`))) +
+  geom_point(alpha = 0.2) +
+  geom_smooth(method = "lm") +
+  theme_classic()
+
+t.test(log(srd$WTdiffmeans), log(nonsrd$WTdiffmeans))
+#the srd WT decay rate is significantly different for PSUs vs non-PSUs (p value < 2.2E-16)
+
+summary(lm(formula = PSUs$`WT/KO` ~ PSUs$WTdiffmeans, data = PSUs))
+#Coefficients: (Intercept = 0.945) (Slope = 0.01984)
+#Slope (p <2e-16, so the slope is significantly different)
+
+#####Looking at WT decay in HSUs: 
+hsunonsrd <- filter(HSUs, HSUs$`WT/KO` < 1.2)
+hsusrd <- filter(HSUs, HSUs$`WT/KO` > 1.2)
+
+summary(hsunonsrd$WTdiffmeans)
+#Median = 1.98, Mean = 2.814
+
+summary(hsusrd$WTdiffmeans)
+#Median = 3.65, mean = 5.29
+
+ggplot(HSUs, aes(x = log(WTdiffmeans), y =log(`WT/KO`))) +
+  geom_point(alpha = 0.2) +
+  geom_smooth(method = "lm") +
+  theme_classic()
+
+t.test(log(hsusrd$WTdiffmeans), log(hsunonsrd$WTdiffmeans))
+#p-value < 2.2E-16, so yes, SRD HSUs are also very different decay rates in WT 
+
+summary(lm(formula = HSUs$`WT/KO` ~ HSUs$WTdiffmeans, data = HSUs))
+#lm shows that p is also less than 2E-16, showing that HSUs are also the same kinda different
+#HSU slope is 0.03125, intercept is 0.96
+
+PSUslim <- data.frame(PSUs$`Gene Name`, PSUs$`WT/KO`)
+colnames(PSUslim)[1] <- 'Gene Name'
+colnames(PSUslim)[2] <- 'OR'
+write.csv(PSUslim,"/Users/caroline/Desktop/srd_github/PSUslim.csv", quote = F)
+
+#Gene Ontology GO TERM Chart (Revigo and GOrilla): 
+setwd("/Users/caroline/Downloads/")
+gotermgraph <- fread('Revigo.R')
+
+#Write up: What we find in the GO terms: 
+#GO terms say that there is a lot of regulation of cellular response
+#cell population proliferation, G Protein signaling, biological regulation (regulation of ossification)
+#Pattern Specification Process
+#Negative Regulation of Gene Expression 
+
+#Regulation: Regulation of cellular responses, cell population profileration, G Protein signaining, 
+#Pattern Specification Process: Developmental process than results in the creation of defined areas/space
+#Negative Regulation of Gene Expression
