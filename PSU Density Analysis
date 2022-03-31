@@ -1,0 +1,89 @@
+#Density Analysis: 
+#density analysis of the psu genes, creates "densitydf", "thinPSU", "thindensitydf" 
+library(tidyverse)
+library(data.table)
+library(matrixStats)
+library(dplyr)
+
+# install.packages("moments")
+library(moments)
+
+setwd("/Users/caroline/Downloads")
+threeprimeutr <- fread("3'_UTRs.csv", header = TRUE)
+
+#Create a "densitydf" with the names of the PSU transcript genes attached to the transcript density data 
+setwd("/Users/caroline/Desktop/srd_github/RNAplfold_analyzed")
+#create huge empty dataframe: 
+PSUs <- filter(threeprimeutr, threeprimeutr$`Delta G per Nucleotide` > -0.25)
+empty <- data.frame(matrix(ncol=1000, nrow=nrow(PSUs)))
+n = 1
+
+for(i in PSUs$`mRNA Number`[1:1000]){
+  tryCatch({
+  name <- read.csv(paste0(i, '.csv'))
+  if(ncol(empty) < nrow(name)){
+    new <- data.frame(matrix(ncol=(nrow(name) - ncol(empty)), nrow=nrow(PSUs)))
+    empty <- cbind(empty, new)}
+  empty[n, 2:(nrow(name) + 1)] <- name$X2
+  n= n+1
+  }, error = function(e) print(paste(e, "is a error")))
+}
+
+#save as rownames = FALSE & add the i into a separate column
+empty[n, 2:(nrow(hold) + 1)] <-
+empty[n,1] <- i
+
+#save the "new" dataframe we just made as a csv.
+write.csv(empty,"/Users/caroline/Desktop/srd_github/smallempty.csv", quote = F)
+
+#Creating a RNA structure density phenotype from the dataframe: what sort of phenotypes will we make? how will we store them?
+#Ideas: Binning outings, length, average probability of binding/density (through both mean, median)
+#We can store these ideas in separate dataframes? 
+#Remove the first column: 
+densitydf <- density[,-1]
+
+#CHARACTERIZING THE STATS OF SPREAD FOR THE PSUs (BY NUCLEOTIDE):
+#one: add in all the columns for length, means, Sds, SE (4 columns total)
+densitydf <- densitydf %>% add_column(new_col = NA, .after =0)
+colnames(densitydf)[1] <- "Length of PSU"
+densitydf <- densitydf %>% add_column(new_col = NA, .after=0)
+colnames(densitydf)[1] <- "Mean Density"
+densitydf <- densitydf %>% add_column(new_col = NA, .after=0)
+colnames(densitydf) [1] <- "Standard Deviation"
+densitydf <- densitydf %>% add_column(new_col = NA, .after=0)
+colnames(densitydf) [1] <- "Standard Error"
+
+#next, add in all the necessary values for each column: 
+#Mean: 
+densitydf$`Mean Density` <- rowMeans(densitydf, na.rm = T)
+#SDS: 
+densitydf$`Standard Deviation` <- rowSds(as.matrix(densitydf), na.rm = T)
+
+#Count the length of the PSUs through rowSums(df) after making every number a NA
+na_density <- !is.na(densitydf)
+#drop the first three columns 
+na_density <- na_density[, -c(1:3)] %>% as.data.frame()
+
+#now count the number of true in each row via rowSums(df)
+na_density$`Length of PSU` <- rowSums(na_density)
+#input the length back into the original dataframe: 
+densitydf$`Length of PSU` <- na_density$`Length of PSU` #length is done
+
+#other stats of spread might include IQR, median, and the variance:
+densitydf <- densitydf %>% add_column(new_col = NA, .after =0)
+colnames(densitydf)[1] <- "IQR"
+densitydf <- densitydf %>% add_column(new_col = NA, .after =0)
+colnames(densitydf)[1] <- "Median"
+densitydf <- densitydf %>% add_column(new_col = NA, .after =0)
+colnames(densitydf)[1] <- "Skewedness"
+
+densitydf$IQR <- rowIQRs(as.matrix(densitydf), na.rm = TRUE)
+densitydf$Median <- rowMedians(as.matrix(densitydf), na.rm = TRUE)
+
+densitydf$Skewedness <- apply(densitydf, 1, skewness, na.rm =TRUE) #the skewedness values are super high?
+
+#Matching up the skewness with the OR (higher OR = more SRD): First, match up the csv.s w/ their associated PSU; then, match up the OR with the PSU & csv. 
+#Thinning down the PSU's info to get rid of superfluous information: 
+thinPSU <- data.frame(PSU$V1, PSU$name, PSU$`Gene Name`, PSU$`WT/KO`)
+#thinning down the densitydf to get rid of superfluous information:  
+thindensitydf <- data.frame(densitydf$`Skewedness`, densitydf$`Median`, densitydf$IQR, densitydf$`Standard Error`, densitydf$`Standard Deviation`, densitydf$`Mean Density`, densitydf$`Length of PSU`)
