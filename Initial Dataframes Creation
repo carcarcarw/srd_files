@@ -1,0 +1,185 @@
+#Hello Git World!
+#Instructions for next steps in my "Investigating PSUs Project" 
+#Step 1: Find the PSUs, and then remove the low expression PSUs 
+#Step 2: Using the WT and the KO G3BP1 files, find the difference in the difference of decay for the PSUs
+#Step 3: Filter for the most significantly different WT and KO G3BP1 PSUs - use t or p test
+
+#Step 1: Calculating the PSUs and removing "low expression PSUs"
+
+#FIRST - Setting up the RNA seq transcript data --> goes through everything --> creates playdough file for the future. 
+#set up workspace: 
+library(dplyr)
+library(tidyr)
+library(data.table)
+library(ggplot2)
+library(matrixStats)
+
+#Threading in the data: 
+setwd("/Users/caroline/Downloads/Archive/")
+tpm_all <- read.csv('all_sample_tpm.csv', header = TRUE)
+
+setwd("/Users/caroline/Downloads/")
+NR_names <- fread('firebrowse_to_refseq_names-2.txt', head = TRUE)
+ENST_names <- fread('firebrowse_to_ensembl_names.txt', head = TRUE)
+UTR<- fread('UTR.csv', header=TRUE)
+threeprimeutr <- fread("3'_UTRs.csv", header = TRUE)
+
+#Using the all_files, look for the highest decay of the decay: 
+head(tpm_all) #I want to get rid of the SHSYsh columns and the 8 hours columns 
+tpm_some <- subset(tpm_all, select = -c(DLD1KO8hr1, DLD1KO8hr2, DLD1WT8hr1, DLD1WT8hr2, SHSY5YshG3BP11, SHSY5YshG3BP12, SHSY5YshScram1, SHSY5YshScram2))
+
+#For the 0 and 16 hours comparisons between KO and WT, do a basic subtraction (directionality) and then do a t-test to test for significant differences between the two columns.
+#Subtraction for directionality: 
+tpm_one <- mutate(tpm_some, tpm_some$DLD1KO0hr1 - tpm_some$DLD1KO16hr1)
+names(tpm_one)[10] <- "Change in KO" 
+
+tpm_two <- mutate(tpm_one, tpm_one$DLD1KO0hr2 - tpm_one$DLD1KO16hr2)
+names(tpm_two)[11] <- "Change in KO.2"
+
+tpm_three <- mutate(tpm_two, tpm_two$DLD1WT0hr1 - tpm_two$DLD1WT16hr1)
+names(tpm_three)[12] <- "Change in WT"
+
+tpm_four <- mutate(tpm_three, tpm_three$DLD1WT0hr2 - tpm_three$DLD1WT16hr2)
+names(tpm_four)[13] <- "Change in WT.2"
+
+tpm_four[is.na(tpm_four)] <- 0
+
+#T-Test: 
+#Adding a t-test column in the dataframe - its between ALL WT versus ALL KO. We also need to filter out the low expression gene values so the data is not essentially constant. 
+#To filtr out for constant values, sum up all the DL per each row and if the value is too small, get rid of the gene row
+
+#Summing up each row 
+tpm_four$sums <-apply(tpm_four[c('DLD1KO0hr1', 'DLD1KO0hr2', 'DLD1KO16hr1','DLD1KO16hr2', 'DLD1WT0hr1', 'DLD1WT0hr2','DLD1WT16hr1','DLD1WT16hr2')], 1, sum)
+tpm_f <- filter(tpm_four, tpm_four$sums > 0.5)
+
+tpm_KO_0 <- subset(tpm_four, select = c('X','DLD1KO0hr1', 'DLD1KO0hr2'))
+tpm_KO_16 <- subset (tpm_four, select = c('X','DLD1KO16hr1', 'DLD1KO16hr2'))
+tpm_WT_0 <- subset(tpm_four, select = c('X', 'DLD1WT0hr1', 'DLD1WT0hr2'))
+tpm_WT_16 <- subset(tpm_four, select = c('X', 'DLD1WT16hr1', 'DLD1WT16hr2'))
+
+#For each subset, we now want to find if any of the values from 1 and 2 are the same - if so, eliminate: 
+head(tpm_KO_0)
+tpm_KO_0 <- mutate(tpm_KO_0, tpm_KO_0$DLD1KO0hr1 == tpm_KO_0$DLD1KO0hr2)
+names(tpm_KO_0)[4] <- "Identical?"
+tpmKO_0<-filter(tpm_KO_0, tpm_KO_0$`Identical?`==FALSE)
+
+tpm_KO_16<- mutate(tpm_KO_16, tpm_KO_16$DLD1KO16hr1 == tpm_KO_16$DLD1KO16hr2)
+names(tpm_KO_16)[4] <- "Identical?"
+tpmKO_16 <- filter(tpm_KO_16, tpm_KO_16$`Identical?`==FALSE)
+
+tpm_WT_0<- mutate(tpm_WT_0,tpm_WT_0$DLD1WT0hr1 == tpm_WT_0$DLD1WT0hr2)
+names(tpm_WT_0)[4] <- "Identical?"
+tpmWT_0 <- filter(tpm_WT_0,tpm_WT_0$`Identical?`==FALSE)
+
+tpm_WT_16 <- mutate(tpm_WT_16, tpm_WT_16$DLD1WT16hr1 == tpm_WT_16$DLD1WT16hr2)
+names(tpm_WT_16)[4] <- "Identical?"
+tpmWT_16 <- filter(tpm_WT_16, tpm_WT_16$`Identical?`==FALSE)
+
+#Adding every part back into a merged dataframe. 
+filteredtpm <- merge(tpmWT_16, tpmWT_0,by='X')
+filteredtpm <- merge(filteredtpm, tpmKO_0, by='X')
+filteredtpm <- merge(filteredtpm, tpmKO_16, by='X')
+#Cleaning up excess columns from the dataframes: 
+filteredtpm <- filteredtpm[,-4]
+filteredtpm <- filteredtpm[,-6]
+filteredtpm <- filteredtpm[,-8]
+filteredtpm <- filteredtpm[,-10]
+#RESULT <- If you head(filteredtpm), you will see a dataframe with all identical values taken out
+head(filteredtpm)
+
+filteredtpm$KOpval <- 1
+for(i in 1:nrow(filteredtpm)){
+  filteredtpm[i,10]<-t.test(c(filteredtpm[i,'DLD1KO0hr1'], filteredtpm[i,'DLD1KO0hr2']), c(filteredtpm[i,'DLD1KO16hr1'], filteredtpm[i,'DLD1KO16hr2']))$p.value
+} 
+names(filteredtpm)[10] <- "KOpval"
+filteredtpm$WTpval <- 1
+for(i in 1:nrow(filteredtpm)){
+  filteredtpm[i,11]<-t.test(c(filteredtpm[i,'DLD1WT0hr1'], filteredtpm[i,'DLD1WT0hr2']), c(filteredtpm[i,'DLD1WT16hr1'], filteredtpm[i,'DLD1WT16hr2']))$p.value
+} 
+head(filteredtpm)
+#Plot of the P-Values for WT versus KO 
+plot(filteredtpm$KOpval~filteredtpm$WTpval, data=filteredtpm, main="T.Test P-Values Detecting Differences Between 0/16 hours for KO and WT", xlab= "Knockout p-values", ylab="Wild Type p-values")
+
+########
+#Step 2: Figure out which WT vs KO have significant p-values (p < 0.05) and negative differences 
+filt.tpm <- filteredtpm[, c('X', 'KOpval', 'WTpval')]
+tpm_merged <- merge(filt.tpm, tpm_four, by = "X")
+tpm_merged <- data.frame(tpm_merged)
+
+#Filter for p-value that are less than 0.05
+tpm_merged <- tpm_merged %>% filter(KOpval < 0.1 &
+                 WTpval < 0.1 & 
+                 'Change in KO' > 0 & 
+                 'Change in KO.2' > 0 & 
+                 'Change in WT' > 0 & 
+                 'Change in WT.2' > 0)
+
+head(tpm_merged)
+tpm_merged$sums <- NULL
+
+#Find the difference in means from t.test for more accurate directionality comparison, which we can extract from the t.test "estimate" value
+tpm_merged$KOdiffmeans <- 1
+for(i in 1:nrow(tpm_merged)){
+  means<-t.test(c(tpm_merged[i,'DLD1KO0hr1'], tpm_merged[i,'DLD1KO0hr2']), c(tpm_merged[i,'DLD1KO16hr1'], tpm_merged[i,'DLD1KO16hr2']))$estimate
+  tpm_merged[i,16]<-means[1]-means[2]
+}
+
+tpm_merged$WTdiffmeans <- 1
+for(i in 1:nrow(tpm_merged)){
+  means<-t.test(c(tpm_merged[i,'DLD1WT0hr1'], tpm_merged[i,'DLD1WT0hr2']), c(tpm_merged[i,'DLD1WT16hr1'], tpm_merged[i,'DLD1WT16hr2']))$estimate
+  tpm_merged[i,17]<-means[1]-means[2]
+}
+
+tpm_merged <- tpm_merged %>% filter(KOpval < 0.1 &
+                                      WTpval < 0.1 & 
+                                      'Change in KO' > 0 & 
+                                      'Change in KO.2' > 0 & 
+                                      'Change in WT' > 0 & 
+                                      'Change in WT.2' > 0)
+colnames(tpm_merged)[1] <- "Gene Name"
+head(tpm_merged)
+
+#Step 3: Find the PSUs, and set up cutoffs for Full Change/SRD PSU candidates
+#First: Matching the PSUs from UTR file to the tpm_merged X column gene names
+setwd("/Users/caroline/Downloads/")
+name_df <- fread('MANE.GRCh38.v0.95.summary.txt', header = TRUE)
+genetoENST <- name_df[,c('symbol', 'Ensembl_nuc')]
+colnames(genetoENST)[1] <- "Gene Name"
+renamedtpm <- merge(tpm_merged, genetoENST, by = "Gene Name")
+ENSTnm <- renamedtpm[,c('Ensembl_nuc')]
+
+#Create matching modified names to merge the dataframes
+#modify names to match precisely: 
+modify <- gsub("\\..*", "", ENSTnm)
+renamedtpm$Ensembl_nuc <- modify
+head(renamedtpm)
+colnames(renamedtpm)[18] <- "name"
+head(renamedtpm)
+mergedwithUTR <- merge(UTR, renamedtpm, by = "name")
+
+#PSU is greater than -0.25: Filter for the PSUs: 
+length(unique(mergedwithUTR$`Gene Name`))
+PSUs <- filter(mergedwithUTR, mergedwithUTR$dG_nt > -0.25) #1506 PSUs
+head(PSUs)
+hist(PSUs$dG_nt, main = "Histogram of PSU dGnt Spread with dGnt > -0.25 Cutoff", xlab="PSU Delta G per Nucleotide", ylab="Frequency")
+hist(PSUs$WTdiffmeans, main = "Histogram of PSU Average Difference in KO 0 vs 16 hours", xlab="Average Difference in Decay between DLD1 0 and 16 hours", ylab="Frequency")
+JoesPSU <- filter(mergedwithUTR, mergedwithUTR$dG_nt > -0.2) #420 PSUs, a more conservative definition
+
+#Calculate the Full Change: if WT is > KO then SRD: 
+PSUs <- mutate(PSUs, PSUs$WTdiffmeans/PSUs$KOdiffmeans)
+colnames(PSUs)[23] <- "WT/KO"
+head(PSUs)
+hist(PSUs$`WT/KO`, main = "Histogram of PSU Odds Ratio", xlab="Odds Ratio", breaks = 50)
+
+#Making the cutoff for the SRD candidates: 
+#If the average count for all the 1.2.3.4 are less than 0.05 cumulatively, then we should eliminate it: 
+#I want to work with a safer subset to work with this data: 
+playdough <- PSUs[,-c('seq', 'energy', 'length')]
+head(playdough)
+
+#Removing anything with a median of 1 TPM, trying to get rid of outliers: 
+playdough <- select(playdough, 'name', 'DLD1KO16hr2', 'DLD1WT0hr1', 'DLD1WT0hr2', 'DLD1WT16hr1', 'DLD1WT16hr2', 'DLD1KO0hr1', 'DLD1KO0hr2', 'DLD1KO16hr1')
+Medians <- rowMedians(as.matrix(playdough[,-1]))
+playdough$Median <- Medians
+head(playdough)
+twocolumns <- playdough[,c('Median', 'name')]
